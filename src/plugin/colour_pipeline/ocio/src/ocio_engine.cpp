@@ -594,10 +594,16 @@ OCIO::TransformRcPtr OCIOEngine::display_transform(
     if (!bypass) {
         std::string _display = display;
         std::string _view    = view;
-        if (display.empty() or view.empty()) {
+        // Fill display and view INDEPENDENTLY (same fix as process_thumbnail):
+        // offscreen/snapshot viewport pipeline instances are never attached to
+        // a physical display so their Display attribute is empty; the combined
+        // `display.empty() or view.empty()` check then discarded a valid
+        // caller-supplied view (e.g. 'raw' for un-tone-mapped media) and
+        // double-graded offscreen renders such as annotation exports.
+        if (_display.empty())
             _display = ocio_config->getDefaultDisplay();
-            _view    = ocio_config->getDefaultView(_display.c_str());
-        }
+        if (_view.empty())
+            _view = ocio_config->getDefaultView(_display.c_str());
 
         OCIO::DisplayViewTransformRcPtr dt = OCIO::DisplayViewTransform::Create();
         dt->setSrc(working_space(src_colour_mgmt_metadata).c_str());
