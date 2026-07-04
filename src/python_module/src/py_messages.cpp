@@ -47,7 +47,7 @@ extern void register_URI_class(py::module &m, const std::string &name);
 extern void register_FrameRateDuration_class(py::module &m, const std::string &name);
 extern void register_vector3_class(py::module &m, const std::string &name);
 extern void register_matrix44_class(py::module &m, const std::string &name);
-extern void register_vec2f_class(py::module &m, const std::string &name);
+extern void register_vector2_class(py::module &m, const std::string &name);
 extern void register_colour_triplet_class(py::module &m, const std::string &name);
 extern void register_uuid_actor_class(py::module &m, const std::string &name);
 extern void register_uuid_actor_vector_class(py::module &m, const std::string &name);
@@ -208,6 +208,6 @@ void py_config::add_messages() {
     add_message_type<xstudio::ui::viewport::Mask>(
         "Mask", "xstudio::ui::viewport::Mask", &register_mask_class);
 
-    add_message_type<Imath::V2f>("Vec2f", "Imath::V2f", &register_vec2f_class);
+    add_message_type<Imath::V2f>("V2f", "Imath::V2f", &register_vector2_class);
 }
 } // namespace caf::python

@@ -490,9 +490,9 @@ void register_matrix44_class(py::module &m, const std::string &name) {
         .def("__str__", str_impl);
 }
 
-void register_vec2f_class(py::module &m, const std::string &name) {
+void register_vector2_class(py::module &m, const std::string &name) {
     auto str_impl = [](const Imath::V2f &v) {
-        return "Vec2f(" + std::to_string(v.x) + ", " + std::to_string(v.y) + ")";
+        return "V2f(" + std::to_string(v.x) + ", " + std::to_string(v.y) + ")";
     };
     py::class_<Imath::V2f>(m, name.c_str())
         .def(py::init<>())
