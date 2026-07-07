@@ -206,6 +206,7 @@ class AnnotationsCore : public plugin::StandardPlugin {
     std::map<std::string, std::atomic_int *> hide_strokes_per_viewport_;
     std::map<std::string, std::atomic_bool *> hide_all_per_viewport_;
     caf::actor live_edit_event_group_;
+    caf::actor draw_events_event_group_;
     utility::Uuid current_edited_annotation_uuid_;
 
     const media_reader::ImageBufDisplaySetPtr &
