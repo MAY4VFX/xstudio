@@ -61,7 +61,7 @@ Item {
     }
 
     function stripTrailingPathSeparator(p) {
-        p = p.endsWith(pathSep) ? p.slice(0, -pathSep.length) : p
+        p = p && p.endsWith(pathSep) ? p.slice(0, -pathSep.length) : p
         return p;
     }
 
@@ -521,16 +521,23 @@ Item {
                             anchors.fill: parent
                             hoverEnabled: true
                             acceptedButtons: Qt.LeftButton
-                            onClicked: sendCommand({"action": "force_scan", "path": model.path})
+                            onClicked: {
+                                sendCommand({"action": "force_scan", "path": model.path})
+                                wasClicked = true
+                            }
                         }
                         visible: isHovered && !model.isLoading
                     }
                     
                     // Loading Indicator
-                    XsText {
-                        text: "..."
-                        visible: model.isLoading
+                    BusyIndicator {
+                        id: busy
+                        Layout.fillHeight: true
                         Layout.rightMargin: 5
+                        implicitWidth: height
+                        running: model.isLoading
+                        visible: running
+                        palette.dark: XsStyleSheet.primaryTextColor
                     }
                 }
                 
