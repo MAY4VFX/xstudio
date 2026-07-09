@@ -279,6 +279,7 @@ ApplicationWindow {
     // Use the Escape key as a global reset-to-home by doing the following:
     //   - stopping playback
     //   - exiting presentation mode if active
+    //.  - exiting fullscreen if not in presentation mode
     //   - making the viewed container the inspected container
     //   - resetting the compare mode to the default for viewed container type
     //   - soloing the selection to just the single hero selected media item
@@ -292,8 +293,12 @@ ApplicationWindow {
 
         onActivated: (context)=> {
             currentPlayhead.playing = false
+
             if (appWindow.layoutName == "Present")
                 appWindow.togglePresentationMode()
+            else if (fullscreen)
+                fullscreen = false
+
             currentMediaContainerIndex = viewportCurrentMediaContainerIndex
             mediaSelectionModel.soloSelection()
 
@@ -311,33 +316,30 @@ ApplicationWindow {
             }
         }
 
-        XsModelProperty {
-            id: __playlist_default_compare
-            role: "valueRole"
-            index: globalStoreModel.searchRecursive("/core/playhead/playlist_default_compare", "pathRole")
-        }
-        property alias playlist_default_compare: __playlist_default_compare.value
-
-        XsModelProperty {
+        XsPreference {
             id: __subset_default_compare
-            role: "valueRole"
-            index: globalStoreModel.searchRecursive("/core/playhead/subset_default_compare", "pathRole")
+            path: "/core/playhead/subset_default_compare"
         }
         property alias subset_default_compare: __subset_default_compare.value
 
-        XsModelProperty {
+        XsPreference {
             id: __contact_sheet_default_compare
-            role: "valueRole"
-            index: globalStoreModel.searchRecursive("/core/playhead/contact_sheet_default_compare", "pathRole")
+            path: "/core/playhead/contact_sheet_default_compare"
         }
         property alias contact_sheet_default_compare: __contact_sheet_default_compare.value
 
-        XsModelProperty {
+        XsPreference {
             id: __timeline_default_compare
-            role: "valueRole"
-            index: globalStoreModel.searchRecursive("/core/playhead/timeline_default_compare", "pathRole")
+            path: "/core/playhead/timeline_default_compare"
         }
         property alias timeline_default_compare: __timeline_default_compare.value
+
+        XsPreference {
+            id: __playlist_default_compare
+            path: "/core/playhead/playlist_default_compare"
+        }
+        property alias playlist_default_compare: __playlist_default_compare.value
+
     }
 
     property alias presentation_mode_hotkey: presentation_mode_hotkey
