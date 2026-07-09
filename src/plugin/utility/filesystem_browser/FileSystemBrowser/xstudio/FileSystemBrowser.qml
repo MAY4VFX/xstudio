@@ -34,6 +34,11 @@ Item {
     // uri requires triple slash before drive letter on Windows, since this is the root.
     property var thumbSrcRoot: Qt.platform.os === "windows" ? "image://thumbnail/file:///" : "image://thumbnail/file://"
 
+    onVisibleChanged: {
+        if (!visible)
+            sendCommand({"action": "stop_scan"})
+    }
+
     FileSystemBrowserScanResultsModel {
         id: __scanResultsModel
         viewMode: root.viewMode
@@ -442,6 +447,23 @@ Item {
         model: pluginData
     }
     
+    XsAttributeValue {
+        id: scanned_dirs_attr
+        attributeTitle: "scanned_dirs"
+        model: pluginData
+        role: "value"
+        onValueChanged: {
+             try {
+                 var val = value
+                 if (val && val !== "[]") {
+                     scannedDirsList = JSON.parse(val)
+                 } else {
+                     scannedDirsList = []
+                 }
+             } catch(e) { }
+        }
+    }
+    
     // Filters
     XsAttributeValue { 
         id: filter_time_attr
@@ -543,7 +565,7 @@ Item {
             spacing: 0
             visible: root.viewMode != 3
             function getItemAtIndex(index) {
-                return fileListView.getItemAtIndex(index)
+                return fileTreeView.getItemAtIndex(index)
             }
 
             FSListHeader {
@@ -691,8 +713,9 @@ Item {
                     onClicked: (mouse) => {
 
                         if (mouse.button === Qt.RightButton && underMouseIndex != -1) {
-                            let clickedItemPath = scanResultsModel.get(underMouseIndex, "path")
-                            thumbContextMenu.itemPath = clickedItemPath
+                            if (!selectedItems.includes(underMouseIndex)) {
+                                selectedItems = [underMouseIndex]
+                            }
                             thumbContextMenu.showMenu(
                                 mouseArea,
                                 mouse.x, mouse.y);
@@ -834,6 +857,14 @@ Item {
         id: thumbToolTip
         delay: 500
         maxWidth: 400
+
+        MouseArea {
+            anchors.fill: parent
+            propagateComposedEvents: true
+            onClicked: (mouse) => mouse.accepted = false
+            onPressed: (mouse) => mouse.accepted = false
+            onReleased: (mouse) => mouse.accepted = false
+        }
     }
 
 }
