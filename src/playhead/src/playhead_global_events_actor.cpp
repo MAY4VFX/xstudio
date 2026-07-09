@@ -428,5 +428,13 @@ void PlayheadGlobalEventsActor::init() {
                 }
             }
             return Imath::M44f();
+        },
+        [=](ui::viewport::viewport_reset_atom) {
+
+            for (const auto &p : viewports_) {
+                auto vp = p.second.viewport;
+                anon_mail(ui::viewport::viewport_reset_atom_v, true).send(vp);
+            }
+
         });
 }

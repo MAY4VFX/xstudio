@@ -144,13 +144,19 @@ thumbnail::ThumbnailBufferPtr OCIOEngine::process_thumbnail(
 
     std::string _display = display;
     std::string _view    = view;
-    if (display.empty() or view.empty()) {
+    // Fill display and view INDEPENDENTLY. The dedicated 'thumbnail_processor'
+    // OCIO instance is never attached to a viewport/media source, so its Display
+    // attribute is empty; the old combined `display.empty() or view.empty()`
+    // check then reset _view to the config default view (e.g. Client-look),
+    // double-grading raw / display-referred media in thumbnails. Only fill in a
+    // value that is actually empty so a valid caller-supplied view survives.
+    if (_display.empty())
         _display = ocio_config->getDefaultDisplay();
-        _view    = ocio_config->getDefaultView(_display.c_str());
-    }
+    if (_view.empty())
+        _view = ocio_config->getDefaultView(_display.c_str());
 
     auto to_lin_group =
-        make_to_lin_processor(src_colour_mgmt_metadata, view, untonemapped_mode, false)
+        make_to_lin_processor(src_colour_mgmt_metadata, _view, untonemapped_mode, false)
             ->createGroupTransform();
     auto to_display_group =
         make_display_processor(src_colour_mgmt_metadata, _display, _view, false)
@@ -588,10 +594,16 @@ OCIO::TransformRcPtr OCIOEngine::display_transform(
     if (!bypass) {
         std::string _display = display;
         std::string _view    = view;
-        if (display.empty() or view.empty()) {
+        // Fill display and view INDEPENDENTLY (same fix as process_thumbnail):
+        // offscreen/snapshot viewport pipeline instances are never attached to
+        // a physical display so their Display attribute is empty; the combined
+        // `display.empty() or view.empty()` check then discarded a valid
+        // caller-supplied view (e.g. 'raw' for un-tone-mapped media) and
+        // double-graded offscreen renders such as annotation exports.
+        if (_display.empty())
             _display = ocio_config->getDefaultDisplay();
-            _view    = ocio_config->getDefaultView(_display.c_str());
-        }
+        if (_view.empty())
+            _view = ocio_config->getDefaultView(_display.c_str());
 
         OCIO::DisplayViewTransformRcPtr dt = OCIO::DisplayViewTransform::Create();
         dt->setSrc(working_space(src_colour_mgmt_metadata).c_str());
