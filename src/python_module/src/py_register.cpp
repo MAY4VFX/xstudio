@@ -33,6 +33,7 @@ CAF_POP_WARNINGS
 #include "xstudio/utility/frame_range.hpp"
 #include "xstudio/utility/notification_handler.hpp"
 #include "xstudio/ui/viewport/mask.hpp"
+#include <Imath/ImathVec.h>
 
 
 namespace py = pybind11;
@@ -487,6 +488,19 @@ void register_matrix44_class(py::module &m, const std::string &name) {
                 s[i][3] = v[3];
             })
         .def("__str__", str_impl);
+}
+
+void register_vector2_class(py::module &m, const std::string &name) {
+    auto str_impl = [](const Imath::V2f &v) {
+        return "V2f(" + std::to_string(v.x) + ", " + std::to_string(v.y) + ")";
+    };
+    py::class_<Imath::V2f>(m, name.c_str())
+        .def(py::init<>())
+        .def(py::init<float, float>())
+        .def_readwrite("x", &Imath::V2f::x)
+        .def_readwrite("y", &Imath::V2f::y)
+        .def("__str__", str_impl)
+        .def("__repr__", str_impl);
 }
 
 void register_colour_triplet_class(py::module &m, const std::string &name) {

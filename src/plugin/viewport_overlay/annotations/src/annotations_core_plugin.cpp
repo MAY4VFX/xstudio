@@ -48,6 +48,7 @@ AnnotationsCore::AnnotationsCore(
 
     live_edit_event_group_ = spawn<broadcast::BroadcastActor>(this);
     link_to(live_edit_event_group_);
+
 }
 
 // AnnotationsCore::~AnnotationsCore() {}
@@ -93,7 +94,15 @@ caf::message_handler AnnotationsCore::message_handler_extensions() {
         },
         [=](utility::event_atom,
             ui::viewport::annotation_atom,
-            const utility::JsonStore &data) { receive_annotation_data(data); },
+            const utility::JsonStore &data) { 
+            receive_annotation_data(data); 
+
+            if (draw_events_event_group_) {
+                // use anon_mail here, so the event 'source' is draw_events_event_group_ and not
+                // the AnnotationCorePlugin instance
+                anon_mail(utility::event_atom_v, ui::viewport::annotation_atom_v, data).send(draw_events_event_group_);
+            }
+        },
         [=](ui::viewport::annotation_atom,
             ui::viewport::viewport_atom,
             const std::string &viewport_name,
@@ -136,6 +145,18 @@ caf::message_handler AnnotationsCore::message_handler_extensions() {
             bool join) {
             // SYNC plugin uses this so it gets updates on live annotations as they are drawn
             anon_mail(broadcast::join_broadcast_atom_v, joiner).send(live_edit_event_group_);
+        },
+        [=](utility::get_event_group_atom,
+            ui::viewport::annotation_atom) -> caf::actor {
+            // This message allows other components (notably python plugins) to join a special
+            // event group that forwards all draw interaction events incoming to the plugin.
+            // Thus the 3rd party component can get all updates on annotation strokes.
+            if (!draw_events_event_group_) {
+                draw_events_event_group_ = spawn<broadcast::BroadcastActor>(this);
+                link_to(draw_events_event_group_);
+            }
+            return draw_events_event_group_;
+
         });
 }
 
@@ -1291,13 +1312,43 @@ void AnnotationsCore::broadcast_live_stroke(
     if (user_edit_data->live_stroke)
         anno->canvas().append_item(*(user_edit_data->live_stroke));
 
+    AnnotationBasePtr anno_ptr(anno);
+
     mail(
         utility::event_atom_v,
         annotation_data_atom_v,
-        AnnotationBasePtr(anno),
+        anno_ptr,
         user_id,
         stroke_completed)
         .send(live_edit_event_group_);
+
+    if (draw_events_event_group_) {
+        // Here we send the whole, serialised annotation data. This can be consumed
+        // by a Python plugin implementing annotation event syncing, for example.
+        // TODO: full python bindings for AnnotationBasePtr to avoid expensive 
+        // serialisation
+        const bool is_shape = user_edit_data->item_type == Canvas::ItemType::Square ||
+                            user_edit_data->item_type == Canvas::ItemType::Circle ||
+                            user_edit_data->item_type == Canvas::ItemType::Arrow ||
+                            user_edit_data->item_type == Canvas::ItemType::Line ||
+                            user_edit_data->item_type == Canvas::ItemType::Ellipse;
+
+        if (!is_shape || stroke_completed) {
+            
+            utility::Uuid plugin_uuid;
+            utility::JsonStore anno_json = anno_ptr->serialise(plugin_uuid);
+            anno_json["user_id"] = user_id;
+            anno_json["stroke_completed"] = stroke_completed;
+            // anon mail
+            anon_mail(
+                utility::event_atom_v,
+                annotation_data_atom_v,
+                anno_json,
+                user_id,
+                stroke_completed)
+                .send(draw_events_event_group_);
+        }        
+    }
 }
 
 void AnnotationsCore::broadcast_live_laser_stroke(
