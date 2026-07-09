@@ -314,6 +314,9 @@ ApplicationWindow {
                 currentPlayhead.compareMode = timeline_default_compare[0] || "Off"
                 currentPlayhead.pinnedSourceMode = true
             }
+
+            // reset viewports
+            studio.resetViewports()
         }
 
         XsPreference {
