@@ -26,7 +26,7 @@ jobs:
     env:
       CMAKE_BUILD_PARALLEL_LEVEL: 3
       VCPKG_DISABLE_METRICS: 1
-      VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-binary-cache
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-binary-cache
 
     steps:
       - name: Check out xSTUDIO
@@ -76,7 +76,7 @@ jobs:
         uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
-            ${{ runner.temp }}/vcpkg-binary-cache
+            .vcpkg-binary-cache
             vcpkg/downloads
           key: xstudio-vcpkg-macos-arm64-${{ hashFiles('xstudio/vcpkg.json', 'xstudio/cmake/vcpkg_overlay_ports/**', 'xstudio/cmake/vcpkg_triplets/**') }}
 
