@@ -114,6 +114,55 @@ jobs:
           set -euo pipefail
           cmake --build build --target install --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
 
+      - name: Bundle macOS runtime dependencies
+        working-directory: xstudio
+        shell: bash
+        run: |
+          set -euo pipefail
+          frameworks=build/xSTUDIO.app/Contents/Frameworks
+          vcpkg_lib=build/vcpkg_installed/arm-osx/lib
+
+          test -d "$frameworks"
+          test -d "$vcpkg_lib"
+
+          # xSTUDIO's upstream install rules copy project libraries but omit the
+          # dynamic vcpkg runtime. Preserve both versioned files and symlinks.
+          find "$vcpkg_lib" -maxdepth 1 -name '*.dylib' \
+            -exec cp -RP {} "$frameworks/" \;
+
+          # Run deployment only after every install rule has populated the app.
+          "$QT_ROOT_DIR/bin/macdeployqt" build/xSTUDIO.app \
+            -qmldir=ui \
+            -always-overwrite \
+            -verbose=3
+
+          # Remove build-machine search paths and give every component a route
+          # to the app's private Frameworks directory.
+          while IFS= read -r -d '' candidate; do
+            file -b "$candidate" | grep -q '^Mach-O' || continue
+
+            while IFS= read -r rpath; do
+              case "$rpath" in
+                "$RUNNER_WORKSPACE"/*)
+                  install_name_tool -delete_rpath "$rpath" "$candidate"
+                  ;;
+              esac
+            done < <(
+              otool -l "$candidate" |
+                awk '/cmd LC_RPATH/{found=1; next} found && /path /{print $2; found=0}'
+            )
+
+            if ! otool -l "$candidate" |
+              awk '/cmd LC_RPATH/{found=1; next} found && /path /{print $2; found=0}' |
+              grep -Fxq '@executable_path/../Frameworks'; then
+              install_name_tool -add_rpath \
+                '@executable_path/../Frameworks' "$candidate"
+            fi
+          done < <(find build/xSTUDIO.app/Contents -type f -print0)
+
+          test -e "$frameworks/libspdlog.1.17.0.dylib"
+          test -e "$frameworks/QtCore.framework/Versions/A/QtCore"
+
       - name: Verify Apple Silicon application
         working-directory: xstudio
         shell: bash
@@ -126,14 +175,43 @@ jobs:
           echo "$app_arch"
           grep -q "arm64" <<<"$app_arch"
 
-          if otool -L build/xSTUDIO.app/Contents/MacOS/xstudio.bin | grep -F "$RUNNER_WORKSPACE"; then
-            echo "The app still references libraries in the runner workspace" >&2
-            exit 1
-          fi
+          missing_count=0
+          macho_count=0
+          while IFS= read -r -d '' candidate; do
+            file -b "$candidate" | grep -q '^Mach-O' || continue
+            macho_count=$((macho_count + 1))
+
+            if { otool -l "$candidate"; otool -L "$candidate"; } |
+              grep -F "$RUNNER_WORKSPACE"; then
+              echo "Runner path remains in $candidate" >&2
+              missing_count=$((missing_count + 1))
+            fi
+
+            while IFS= read -r dependency; do
+              relative_path=${dependency#@rpath/}
+              if [[ ! -e "build/xSTUDIO.app/Contents/Frameworks/$relative_path" ]]; then
+                echo "Missing $dependency required by $candidate" >&2
+                missing_count=$((missing_count + 1))
+              fi
+            done < <(otool -L "$candidate" | awk '$1 ~ /^@rpath\// {print $1}')
+          done < <(find build/xSTUDIO.app/Contents -type f -print0)
+
+          test "$macho_count" -gt 0
+          test "$missing_count" -eq 0
 
           version=$(sed -nE 's/^set\(XSTUDIO_GLOBAL_VERSION "([^"]+)".*/\1/p' CMakeLists.txt)
           test -n "$version"
           short_sha=${GITHUB_SHA:0:8}
+
+          plutil -replace CFBundleIdentifier \
+            -string org.aswf.xstudio.community \
+            build/xSTUDIO.app/Contents/Info.plist
+          plutil -replace CFBundleShortVersionString \
+            -string "$version" \
+            build/xSTUDIO.app/Contents/Info.plist
+          plutil -replace CFBundleVersion \
+            -string "$short_sha" \
+            build/xSTUDIO.app/Contents/Info.plist
 
           echo "XSTUDIO_VERSION=$version" >> "$GITHUB_ENV"
           echo "RELEASE_TAG=v${version}-macos-arm64-${short_sha}" >> "$GITHUB_ENV"
