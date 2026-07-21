@@ -74,7 +74,8 @@ jobs:
 
       - name: Restore vcpkg binary cache
         if: ${{ !inputs.clean_dependencies }}
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        id: vcpkg-cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
         with:
           path: |
             .vcpkg-binary-cache
@@ -96,6 +97,15 @@ jobs:
           cmake -B build \
             --preset MacOSNinjaRelease \
             -DQt6_DIR="$QT_ROOT_DIR/lib/cmake/Qt6"
+
+      - name: Save vcpkg binary cache after configuration
+        if: ${{ steps.vcpkg-cache.outputs.cache-hit != 'true' }}
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            .vcpkg-binary-cache
+            vcpkg/downloads
+          key: xstudio-vcpkg-macos-arm64-${{ hashFiles('xstudio/vcpkg.json', 'xstudio/cmake/vcpkg_overlay_ports/**', 'xstudio/cmake/vcpkg_triplets/**') }}
 
       - name: Build and install xSTUDIO
         working-directory: xstudio
