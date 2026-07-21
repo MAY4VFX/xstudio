@@ -139,33 +139,33 @@ jobs:
           echo "RELEASE_TAG=v${version}-macos-arm64-${short_sha}" >> "$GITHUB_ENV"
           echo "DMG_NAME=xSTUDIO-${version}-${short_sha}-macOS-arm64.dmg" >> "$GITHUB_ENV"
 
-      - name: Ad-hoc sign application
+      - name: Ad-hoc sign Mach-O components
         working-directory: xstudio
         shell: bash
         run: |
           set -euo pipefail
 
-          # Sign actual code explicitly. `codesign --deep` misidentifies QML
-          # directories such as VideoRenderer.1 as malformed bundles.
+          # xSTUDIO currently stores QML data below Contents/PlugIns. codesign
+          # interprets versioned QML directories there as malformed bundles, so
+          # sign each Mach-O outside the app and then put it back in place.
+          signing_dir=$(mktemp -d "$RUNNER_TEMP/xstudio-sign.XXXXXX")
+          trap 'rm -rf -- "$signing_dir"' EXIT
+          signed_count=0
+
           while IFS= read -r -d '' candidate; do
             if file -b "$candidate" | grep -q '^Mach-O'; then
-              codesign --force --sign - "$candidate"
+              staged="$signing_dir/component"
+              cp -p "$candidate" "$staged"
+              codesign --force --sign - "$staged"
+              codesign --verify --strict --verbose=2 "$staged"
+              mv -f "$staged" "$candidate"
+              signed_count=$((signed_count + 1))
             fi
           done < <(find build/xSTUDIO.app/Contents -type f -print0)
 
-          # Sign nested bundles from the inside out, then seal the outer app.
-          for bundle_kind in framework xpc appex app; do
-            while IFS= read -r -d '' bundle; do
-              codesign --force --sign - "$bundle"
-              codesign --verify --strict --verbose=2 "$bundle"
-            done < <(
-              find build/xSTUDIO.app/Contents -mindepth 1 -type d \
-                -name "*.${bundle_kind}" -print0
-            )
-          done
-
-          codesign --force --sign - build/xSTUDIO.app
-          codesign --verify --strict --verbose=2 build/xSTUDIO.app
+          test "$signed_count" -gt 0
+          echo "Ad-hoc signed $signed_count Mach-O components"
+          codesign --display --verbose=2 build/xSTUDIO.app/Contents/MacOS/xstudio.bin
 
       - name: Create and verify DMG
         working-directory: xstudio
@@ -203,7 +203,7 @@ jobs:
           Community build of ASWF xSTUDIO for Apple Silicon Macs.
 
           - Native arm64 build for M1, M2, M3, M4, and M5 Macs
-          - Ad-hoc code signed; not notarized by Apple
+          - Mach-O components are ad-hoc signed; the app is not notarized by Apple
           - Built automatically from commit ${GITHUB_SHA}
           - DMG and SHA-256 checksum are attached below
 
