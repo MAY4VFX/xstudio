@@ -1,0 +1,216 @@
+name: Build xSTUDIO macOS ARM64 DMG
+
+on:
+  workflow_dispatch:
+    inputs:
+      clean_dependencies:
+        description: Rebuild dependencies without restoring the vcpkg cache
+        required: true
+        type: boolean
+        default: false
+
+permissions:
+  actions: write
+  contents: write
+
+concurrency:
+  group: xstudio-macos-arm64-dmg
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: xSTUDIO Release (Apple Silicon)
+    runs-on: macos-15
+    timeout-minutes: 360
+
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 3
+      VCPKG_DISABLE_METRICS: 1
+      VCPKG_DEFAULT_BINARY_CACHE: ${{ runner.temp }}/vcpkg-binary-cache
+
+    steps:
+      - name: Check out xSTUDIO
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
+          path: xstudio
+
+      - name: Check out the pinned vcpkg baseline
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          repository: microsoft/vcpkg
+          ref: c2aeddd80357b17592e59ad965d2adf65a19b22f
+          path: vcpkg
+
+      - name: Select the tested Xcode toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo xcode-select --switch /Applications/Xcode_16.4.app/Contents/Developer
+          xcodebuild -version
+          test "$(uname -m)" = "arm64"
+
+      - name: Install build tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew install ninja pkg-config nasm autoconf autoconf-archive automake
+          brew cleanup --prune=all
+          cmake --version
+          ninja --version
+          df -h /
+
+      - name: Install Qt 6.5.3
+        uses: jurplel/install-qt-action@48d3ad6db93f3627c8ee7a0454bc6f3744f7e730 # v4.3.1
+        with:
+          version: "6.5.3"
+          host: mac
+          target: desktop
+          arch: clang_64
+          modules: qtimageformats
+          cache: true
+          cache-key-prefix: xstudio-qt-6.5.3-macos
+
+      - name: Restore vcpkg binary cache
+        if: ${{ !inputs.clean_dependencies }}
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: |
+            ${{ runner.temp }}/vcpkg-binary-cache
+            vcpkg/downloads
+          key: xstudio-vcpkg-macos-arm64-${{ hashFiles('xstudio/vcpkg.json', 'xstudio/cmake/vcpkg_overlay_ports/**', 'xstudio/cmake/vcpkg_triplets/**') }}
+
+      - name: Bootstrap vcpkg
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
+          ./vcpkg/bootstrap-vcpkg.sh -disableMetrics
+
+      - name: Configure xSTUDIO for Apple Silicon
+        working-directory: xstudio
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -B build \
+            --preset MacOSNinjaRelease \
+            -DQt6_DIR="$QT_ROOT_DIR/lib/cmake/Qt6"
+
+      - name: Build and install xSTUDIO
+        working-directory: xstudio
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake --build build --target install --parallel "$CMAKE_BUILD_PARALLEL_LEVEL"
+
+      - name: Verify Apple Silicon application
+        working-directory: xstudio
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -d build/xSTUDIO.app
+          test -x build/xSTUDIO.app/Contents/MacOS/xstudio.bin
+
+          app_arch=$(file build/xSTUDIO.app/Contents/MacOS/xstudio.bin)
+          echo "$app_arch"
+          grep -q "arm64" <<<"$app_arch"
+
+          if otool -L build/xSTUDIO.app/Contents/MacOS/xstudio.bin | grep -F "$RUNNER_WORKSPACE"; then
+            echo "The app still references libraries in the runner workspace" >&2
+            exit 1
+          fi
+
+          version=$(sed -nE 's/^set\(XSTUDIO_GLOBAL_VERSION "([^"]+)".*/\1/p' CMakeLists.txt)
+          test -n "$version"
+          short_sha=${GITHUB_SHA:0:8}
+
+          echo "XSTUDIO_VERSION=$version" >> "$GITHUB_ENV"
+          echo "RELEASE_TAG=v${version}-macos-arm64-${short_sha}" >> "$GITHUB_ENV"
+          echo "DMG_NAME=xSTUDIO-${version}-${short_sha}-macOS-arm64.dmg" >> "$GITHUB_ENV"
+
+      - name: Ad-hoc sign application
+        working-directory: xstudio
+        shell: bash
+        run: |
+          set -euo pipefail
+          codesign --force --deep --sign - build/xSTUDIO.app
+          codesign --verify --deep --strict --verbose=2 build/xSTUDIO.app
+
+      - name: Create and verify DMG
+        working-directory: xstudio
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dmg-root dist
+          ditto build/xSTUDIO.app dmg-root/xSTUDIO.app
+          ln -s /Applications dmg-root/Applications
+
+          hdiutil create \
+            -volname "xSTUDIO ${XSTUDIO_VERSION} ARM64" \
+            -srcfolder dmg-root \
+            -format UDZO \
+            -ov \
+            "dist/$DMG_NAME"
+
+          hdiutil verify "dist/$DMG_NAME"
+          (
+            cd dist
+            shasum -a 256 "$DMG_NAME" > "$DMG_NAME.sha256"
+          )
+          ls -lh dist
+
+      - name: Publish GitHub Release
+        working-directory: xstudio
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          title="xSTUDIO ${XSTUDIO_VERSION} for macOS Apple Silicon (arm64)"
+          notes=$(cat <<EOF
+          Community build of ASWF xSTUDIO for Apple Silicon Macs.
+
+          - Native arm64 build for M1, M2, M3, M4, and M5 Macs
+          - Ad-hoc code signed; not notarized by Apple
+          - Built automatically from commit ${GITHUB_SHA}
+          - DMG and SHA-256 checksum are attached below
+
+          Installation: open the DMG and copy xSTUDIO.app to /Applications. On the first launch, macOS verification may take several minutes.
+          EOF
+          )
+
+          if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" dist/* \
+              --clobber \
+              --repo "$GITHUB_REPOSITORY"
+          else
+            gh release create "$RELEASE_TAG" dist/* \
+              --repo "$GITHUB_REPOSITORY" \
+              --target "$GITHUB_SHA" \
+              --title "$title" \
+              --notes "$notes"
+          fi
+
+          asset_count=$(gh release view "$RELEASE_TAG" \
+            --repo "$GITHUB_REPOSITORY" \
+            --json assets \
+            --jq '.assets | length')
+          test "$asset_count" -eq 2
+
+      - name: Clean workflow artifacts
+        if: ${{ always() }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts?per_page=100" \
+            --jq '.artifacts[].id' |
+          while read -r artifact_id; do
+            test -n "$artifact_id" || continue
+            gh api --method DELETE \
+              "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}"
+          done
