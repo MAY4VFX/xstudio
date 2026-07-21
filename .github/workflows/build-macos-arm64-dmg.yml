@@ -144,8 +144,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          codesign --force --deep --sign - build/xSTUDIO.app
-          codesign --verify --deep --strict --verbose=2 build/xSTUDIO.app
+
+          # Sign actual code explicitly. `codesign --deep` misidentifies QML
+          # directories such as VideoRenderer.1 as malformed bundles.
+          while IFS= read -r -d '' candidate; do
+            if file -b "$candidate" | grep -q '^Mach-O'; then
+              codesign --force --sign - "$candidate"
+            fi
+          done < <(find build/xSTUDIO.app/Contents -type f -print0)
+
+          # Sign nested bundles from the inside out, then seal the outer app.
+          for bundle_kind in framework xpc appex app; do
+            while IFS= read -r -d '' bundle; do
+              codesign --force --sign - "$bundle"
+              codesign --verify --strict --verbose=2 "$bundle"
+            done < <(
+              find build/xSTUDIO.app/Contents -mindepth 1 -type d \
+                -name "*.${bundle_kind}" -print0
+            )
+          done
+
+          codesign --force --sign - build/xSTUDIO.app
+          codesign --verify --strict --verbose=2 build/xSTUDIO.app
 
       - name: Create and verify DMG
         working-directory: xstudio
