@@ -158,7 +158,10 @@ jobs:
               install_name_tool -add_rpath \
                 '@executable_path/../Frameworks' "$candidate"
             fi
-          done < <(find build/xSTUDIO.app/Contents -type f -print0)
+          done < <(
+            find build/xSTUDIO.app/Contents -type f \
+              \( -perm -111 -o -name '*.dylib' -o -name '*.so' \) -print0
+          )
 
           test -e "$frameworks/libspdlog.1.17.0.dylib"
           test -e "$frameworks/QtCore.framework/Versions/A/QtCore"
@@ -187,14 +190,22 @@ jobs:
               missing_count=$((missing_count + 1))
             fi
 
+            install_id=$(
+              otool -D "$candidate" 2>/dev/null |
+                awk 'NR == 2 {print; exit}' || true
+            )
             while IFS= read -r dependency; do
+              [[ "$dependency" == "$install_id" ]] && continue
               relative_path=${dependency#@rpath/}
               if [[ ! -e "build/xSTUDIO.app/Contents/Frameworks/$relative_path" ]]; then
                 echo "Missing $dependency required by $candidate" >&2
                 missing_count=$((missing_count + 1))
               fi
             done < <(otool -L "$candidate" | awk '$1 ~ /^@rpath\// {print $1}')
-          done < <(find build/xSTUDIO.app/Contents -type f -print0)
+          done < <(
+            find build/xSTUDIO.app/Contents -type f \
+              \( -perm -111 -o -name '*.dylib' -o -name '*.so' \) -print0
+          )
 
           test "$macho_count" -gt 0
           test "$missing_count" -eq 0
@@ -239,7 +250,10 @@ jobs:
               mv -f "$staged" "$candidate"
               signed_count=$((signed_count + 1))
             fi
-          done < <(find build/xSTUDIO.app/Contents -type f -print0)
+          done < <(
+            find build/xSTUDIO.app/Contents -type f \
+              \( -perm -111 -o -name '*.dylib' -o -name '*.so' \) -print0
+          )
 
           test "$signed_count" -gt 0
           echo "Ad-hoc signed $signed_count Mach-O components"
