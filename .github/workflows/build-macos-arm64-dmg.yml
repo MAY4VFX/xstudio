@@ -228,15 +228,32 @@ jobs:
           echo "RELEASE_TAG=v${version}-macos-arm64-${short_sha}" >> "$GITHUB_ENV"
           echo "DMG_NAME=xSTUDIO-${version}-${short_sha}-macOS-arm64.dmg" >> "$GITHUB_ENV"
 
-      - name: Ad-hoc sign Mach-O components
+      - name: Normalize and ad-hoc sign application bundle
         working-directory: xstudio
         shell: bash
         run: |
           set -euo pipefail
 
-          # xSTUDIO currently stores QML data below Contents/PlugIns. codesign
-          # interprets versioned QML directories there as malformed bundles, so
-          # sign each Mach-O outside the app and then put it back in place.
+          app=build/xSTUDIO.app
+
+          # Apple reserves PlugIns and Frameworks for code. Keep xSTUDIO's
+          # runtime paths working with symlinks while sealing data in Resources.
+          mkdir -p "$app/Contents/Resources/xstudio"
+          mv "$app/Contents/PlugIns/xstudio/qml" \
+            "$app/Contents/Resources/xstudio/qml"
+          ln -s ../../Resources/xstudio/qml \
+            "$app/Contents/PlugIns/xstudio/qml"
+
+          mkdir -p "$app/Contents/Resources/python"
+          mv "$app/Contents/Frameworks/lib" \
+            "$app/Contents/Resources/python/lib"
+          ln -s ../Resources/python/lib "$app/Contents/Frameworks/lib"
+
+          test -L "$app/Contents/PlugIns/xstudio/qml"
+          test -L "$app/Contents/Frameworks/lib"
+
+          # Sign each Mach-O outside the app so codesign does not infer an
+          # enclosing bundle before the nested components are ready.
           signing_dir=$(mktemp -d "$RUNNER_TEMP/xstudio-sign.XXXXXX")
           trap 'rm -rf -- "$signing_dir"' EXIT
           signed_count=0
@@ -257,7 +274,19 @@ jobs:
 
           test "$signed_count" -gt 0
           echo "Ad-hoc signed $signed_count Mach-O components"
-          codesign --display --verbose=2 build/xSTUDIO.app/Contents/MacOS/xstudio.bin
+
+          # Seal real nested bundles inside-out, then seal and recursively
+          # validate the outer application just as Gatekeeper does.
+          while IFS= read -r -d '' framework; do
+            codesign --force --sign - "$framework"
+          done < <(
+            find "$app/Contents/Frameworks" -type d \
+              -name '*.framework' -print0
+          )
+
+          codesign --force --sign - "$app"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          codesign --display --verbose=2 "$app"
 
       - name: Create and verify DMG
         working-directory: xstudio
@@ -295,7 +324,7 @@ jobs:
           Community build of ASWF xSTUDIO for Apple Silicon Macs.
 
           - Native arm64 build for M1, M2, M3, M4, and M5 Macs
-          - Mach-O components are ad-hoc signed; the app is not notarized by Apple
+          - The application bundle is ad-hoc signed; it is not notarized by Apple
           - Built automatically from commit ${GITHUB_SHA}
           - DMG and SHA-256 checksum are attached below
 
